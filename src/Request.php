@@ -29,7 +29,7 @@ class Request
     private $_fields = [];
 
     public function __construct(
-        MercadoLivreAPI $parent,
+        MercadoLivre $parent,
         $url)
     {
         $this->_userAgent =  'Dalvik/2.1.0 (Linux; U; Android 6.0.1; XT1225 Build/MPGS24.107-70.2-7)';
