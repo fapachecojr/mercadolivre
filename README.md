@@ -1,2 +1,2 @@
-# Veloccer / Mercado Livre
+# Veloccer / Mercado Livre API
 Mercado Livre API
