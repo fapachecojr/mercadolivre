@@ -1,0 +1,9 @@
+{
+    "name": "veloccer/mercadolivre",
+    "description": "Mercado Livre Private",
+    "autoload": {
+       "psr-4": {
+           "MercadoLivre\\": "src"
+       }
+   }
+}
