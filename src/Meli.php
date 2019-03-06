@@ -238,4 +238,31 @@ class Meli {
         
         return $return;
     }
+    
+    /**
+     * Check and construct an real URL to make request
+     *
+     * @param string $path
+     * @param array $params
+     * @return string
+     */
+    public function make_path($path, $params = array()) {
+        if (!preg_match("/^http/", $path)) {
+            if (!preg_match("/^\//", $path)) {
+                $path = '/'.$path;
+            }
+            $uri = $this->urls['API_ROOT_URL'].$path;
+        } else {
+            $uri = $path;
+        }
+        if(!empty($params)) {
+            $paramsJoined = array();
+            foreach($params as $param => $value) {
+               $paramsJoined[] = "$param=$value";
+            }
+            $params = '?'.implode('&', $paramsJoined);
+            $uri = $uri.$params;
+        }
+        return $uri;
+    }
 }
