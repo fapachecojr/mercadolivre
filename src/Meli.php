@@ -218,7 +218,7 @@ class Meli {
         return $exec;
     }
     /**
-     * Execute all requests and returns the json body and headers
+     * Execute all requests and returns the json body and headers 
      * 
      * @param string $path
      * @param array $opts
