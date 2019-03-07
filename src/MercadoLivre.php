@@ -1,179 +1,201 @@
 <?php
 
-namespace MercadoLivre;
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
 
 /**
- * MercadoLivre API v1.
+ * Description of MercadoLivre
  *
- * TERMS OF USE:
- * - This code is in no way affiliated with, authorized, maintained, sponsored
- *   or endorsed by MercadoLivre or any of its affiliates or subsidiaries. This is
- *   an independent and unofficial API. Use at your own risk.
- * - We do NOT support or tolerate anyone who wants to use this API to send spam
- *   or commit other online crimes.
- *
+ * @author fapachecojr
  */
-class MercadoLivre {
-
-    /**
-     * Rest url
-     *
-     * @var string
-     * */
-    protected $_url = 'https://api.mercadolibre.com/';
+class MercadoLivre extends Base{
     
-    protected $mCurl = null;
-
-    protected $_userAgent = 'Dalvik/2.1.0 (Linux; U; Android 6.0.1; XT1225 Build/MPGS24.107-70.2-7)';    
+    public static $_model = 'mercadolivre';
     
-    /**
-     * config to all requests
-     *
-     * @var array
-     * */
-    private static $cfg = [];
-    
-    
-    private $cookieJar = null;
+    /*
+    *
+    * Função de login
+    *
+    */
 
-    public function __construct($data = null) {
+    public function index(){
 
+        try {
+            $data   = parent::$request->data;
+            
+            $app_id   = Utils::clear($data->application_id);
+            if(!isset($app_id)) throw new Exception("Você deve informar o Application ID.");
 
-        if (empty($data))
-            throw new Exception("Empty data in __construct");
+            $user_id   = $data->user_id;
+            if(!isset($user_id)) throw new Exception("Você deve informar o User ID.");
 
-        if (is_array($data)) {
+            $access_token   = $data->access_token;
+            if(!isset($access_token)) throw new Exception("Você deve informar o Access Token.");
+            
+            $internal = new \MercadoLivre\MercadoLivre(['app_id' => $app_id, 'user_id' => $user_id, 'access_token' => $access_token]);
+            $dados['user'] = $internal->getInfoUser();
+            $dados['app'] = $internal->getInfoApp();
+            
+            if($dados['user']['status'] == 'ok' && $dados['app']['status'] == 'ok')
+            {
+                $jsonApp = json_decode($dados['app']['data']);
+                $insert = [
+                    '_id'             => new MongoId(),
+                    'account'         => new MongoId(parent::$account['_id']),
+                    'model'           => self::$_model,
+                    'user'            => [
+                        'app_id'      => $app_id,
+                        'use_id'      => $user_id,
+                        'access_token'=> $access_token,
+                        'code'        => ''
+                    ],
+                    'dealer_name'   => $jsonApp->company->corporate_name,
+                    'sellers'       => [
+                        'new'   => 1,
+                        'used'  => 1,
+                    ],
+                    'active' => 1,
+                    'create_at' => new MongoDate()
+                ];
 
-            if (isset($data['app_id'])) {
+                // Verifica se pode inserir
+                $find = [
+                    'account'       => new MongoId(parent::$account['_id']),
+                    'model'         => self::$_model,
+                    'user.app_id'   => $app_id,
+                    'active' => 1
+                ];
 
-                if (empty($data['app_id']))
-                    throw new Exception("Empty data[Application ID]");
-                if (empty($data['user_id']))
-                    throw new Exception("Empty data[User ID]");
-                if (empty($data['access_token']))
-                    throw new Exception("Empty data[Access Token]");
+                if(!parent::$db->accounts_integrations->findOne($find))
+                {
+                    //Faz inserção
+                    parent::$db->accounts_integrations->insert($insert);
 
-                $this->cookieJar = tempnam('/tmp','cookie-mercado-livre-'.date('YmdHis'));
-                
-                self::$cfg['app_id'] = $data['app_id'];
-                self::$cfg['user_id'] = $data['user_id'];
-                self::$cfg['access_token'] = $data['access_token'];
+                    $action_string = parent::$user['full_name'] . ' ativou essa integração.';
+                    $action_link    = '<a href="*|LINK_USER|*" >'. parent::$user['full_name'] . '</a> ativou essa integração.';
 
-            } else {
-                throw new Exception("Error data in __construct");
+                    $push = [
+                        'logs' => [
+                            '_id'           => new MongoId(),
+                            'type'          => 'insert',
+                            'user'          => new MongoId(parent::$user['_id']),
+                            'action_string' => $action_string,
+                            'action_link'   => $action_link,
+                            'create_at'     => new MongoDate()
+                        ]
+                    ];
+
+                    parent::$db->accounts_integrations->update(['_id' => new MongoId($insert['_id'])], ['$push' => $push], ['upsert' => 1]);    
+                    
+                    Flight::json([
+                        'status' => 'ok'
+                    ]);
+                    die();
+                }
+                else
+                {
+                    Flight::json([
+                        'status' => 'fail',
+                        'message' => 'A integração já existe.'
+                    ]);
+                    die();
+                }
             }
+            else
+            {
+                Flight::json([
+                    'status' => 'fail',
+                    'message' => 'Verifique os dados informados. Não foi possível realizar a integração.'
+                ]);
+            }
+            
+        } catch (Exception $e) {
+
+            Flight::json([
+                'status' => 'fail',
+                'message' => $e->getMessage()
+            ]);
+            die();
+            
         }
-    }
-    
-    public function getInfoUser()
-    {
-        $_request = $this->request("https://api.mercadolibre.com/users/".self::$cfg['user_id']."/")
-                ->addHeader('Accept', 'application/json')
-                ->getResponse();
         
-        if($_request['status'] == 'ok')
-        {
-            return array(
-                "status" => "ok",
-                "nickname" => $_request['body']['nickname'],
-                "id" => $_request['body']['id'],
-                "permalink" => $_request['body']['permalink']
-            );
-        }
-        else
-        {
-            return array("status"=>"fail","message"=>"API não encontro dados com o User ID informado.");
-        }
     }
     
-    public function getInfoApp()
-    {         
-        $curl = curl_init();
+    public function verifica() {
+        try {
+            error_reporting(E_ALL);
+            ini_set('display_errors', 1);
+            $data   = parent::$request->data;
+            
+            $meli = new MercadoLivre\Meli($data->app_id, "L2kfNrrU6RwxLmtQmhCYehd15Et9M4ZV");
+            $urlGetCode = $meli->getAuthUrl("https://manager.veloccer.com/integration/mercadolivre/redirect/account/aa11bb22", MercadoLivre\Meli::$AUTH_URL['MLB']);
+            echo $urlGetCode;die();
+            // create a new cURL resource
+            $ch = curl_init();
 
-        curl_setopt_array($curl, array(
-          CURLOPT_URL => $this->_url."users/me?access_token=".self::$cfg['access_token']."&_MELI_SDK_RANDOM=0.05539141156116326",
-          CURLOPT_RETURNTRANSFER => true,
-          CURLOPT_ENCODING => "",
-          CURLOPT_MAXREDIRS => 10,
-          CURLOPT_TIMEOUT => 30,
-          CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-          CURLOPT_CUSTOMREQUEST => "GET",
-        ));
+            // set URL and other appropriate options
+            curl_setopt($ch, CURLOPT_URL, $urlGetCode);
+            curl_setopt($ch, CURLOPT_HEADER, 0);
 
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
+            // grab URL and pass it to the browser
+            $result = curl_exec($ch);
+            
+            print_r($result);die();
 
-        curl_close($curl);
+            // close cURL resource, and free up system resources
+            curl_close($ch);
+            
+            echo $urlGetCode;die();
+            echo 'lalala';
+            $mCurl = curl_init($urlGetCode);
+            curl_setopt($mCurl, CURLOPT_USERAGENT, 'Dalvik/2.1.0 (Linux; U; Android 6.0.1; XT1225 Build/MPGS24.107-70.2-7)');
+            curl_setopt($mCurl, CURLOPT_RETURNTRANSFER, 1);
+            echo 'bbbb';
+            curl_setopt($mCurl, CURLOPT_COOKIEJAR, tempnam('/tmp','cookie-mercadolivre-'.date('YmdHis')));
+            $page = curl_exec($mCurl);
+            echo 'ccccc';
+            print_r($page);die();
+            curl_close($mCurl);
+            
+            print_r($redirectUrl);die();
+            $user = $meli->authorize("APP_USR-1452048172760205-030620-045e5535f12efff451aedec1e8c312f4-72447107", "https://manager.veloccer.com");
+            
+            $access_token = $user['body']->access_token;
+            $expires_in = time() + $user['body']->expires_in;
+            $refresh_token = $user['body']->refresh_token;
+            
+            $internal = new \MercadoLivre\MercadoLivre(['app_id' => $data->app_id, 'user_id' => $data->user_id, 'access_token' => $access_token]);
+            $dados['user'] = $internal->getInfoUser();
+            $dados['app'] = $internal->getInfoApp();
+            
+            Flight::json([
+                'status' => 'ok',
+                'dados' => $dados
+            ]);
+        } catch (Exception $e) {
 
-        if ($err) {
-          return array(
-              'status' => "fail",
-              'message' => "cURL Error #:" . $err
-          );
-        } else {
-          return array(
-              'status' => "ok",
-              'data' => $response
-          );
+            Flight::json([
+                'status'    => 'fail',
+                'message'   => $e->getMessage()
+            ]);
         }
+       
     }
-//
-//    public function login() {
-//        $this->mCurl = curl_init($this->_url .'restrito.index/index');
-//        curl_setopt($this->mCurl, CURLOPT_USERAGENT, $this->_userAgent);
-//        curl_setopt($this->mCurl, CURLOPT_RETURNTRANSFER, 1);
-//        curl_setopt($this->mCurl, CURLOPT_COOKIEJAR, $this->cookieJar);
-//        curl_setopt($this->mCurl, CURLOPT_POSTFIELDS, 'email_usuario='.self::$cfg['email'].'&senha_usuario='.self::$cfg['password']);
-//        $page = curl_exec($this->mCurl);
-//        curl_close($this->mCurl);
-//    }
-//    
-//    public function getMeusDados()
-//    {            
-//        $this->mCurl = curl_init($this->_url . 'restrito.alterardados');
-//        curl_setopt($this->mCurl, CURLOPT_USERAGENT, $this->_userAgent);
-//        curl_setopt($this->mCurl, CURLOPT_RETURNTRANSFER, 1);
-//        curl_setopt($this->mCurl, CURLOPT_COOKIEFILE, $this->cookieJar);
-//        $page = curl_exec($this->mCurl);
-//        curl_close($this->mCurl);
-//
-//        //DOM Resp
-//        $oDom = new \MercadoLivre\simple_html_dom();
-//        $oDom->load($page);
-//
-//            $dados = [
-//                'nome' => $oDom->find('[name="data[Usuario][email]]"', 0)->value,
-//                'nome_fantasia' => $oDom->find('[nome_fantasia]', 0)->value,
-//                'nome_cpf' => $oDom->find('[nome_cpf]', 0)->value,
-//                'telefone_fixo' => $oDom->find('[name="telefone_fixo"]', 0)->value,
-//                'telefone_whatsapp' => $oDom->find('[name="telefone_whatsapp"]', 0)->value,
-//                'cliente_nome_celular1' => $oDom->find('[name="cliente_nome_celular1"]', 0)->value,
-//                'cliente_nome_celular2' => $oDom->find('[name="cliente_nome_celular2"]', 0)->value,
-//                'cliente_nome_nextel_fax' => $oDom->find('[name="cliente_nome_nextel_fax"]', 0)->value,
-//                'cliente_cep' => $oDom->find('[name="cliente_cep"]', 0)->value,
-//                'cliente_endereco' => $oDom->find('[name="cliente_endereco"]', 0)->value,
-//                'cliente_numero' => $oDom->find('[name="cliente_numero"]', 0)->value,
-//                'cliente_complemento' => $oDom->find('[name="cliente_complemento"]', 0)->value,
-//                'cliente_bairro' => $oDom->find('[name="cliente_bairro"]', 0)->value
-//            ];
-//       
-//        return $dados;
-//    }
-//
-    public function removeCookieJar() {
-        //unlink($this->cookieJar) or die("Can't unlink ".$this->cookieJar);
-    }
-
-    /**
-     *
-     * Used internally, but can also be used by end-users if they want
-     * to create completely custom API queries without modifying this library.
-     *
-     * @param string $url
-     *
-     * @return array
-     */
-    public function request($url) {
-        return new Request($this, $url);
+    
+    public function setCode($id, $URI)
+    {
+        try{
+            $content = str_replace("/integration/mercadolivre/redirect/account/".$id."?code=","",$URI);
+            $file = filter_input(INPUT_SERVER,"DOCUMENT_ROOT") . "/temp/mercadolivre/account-".$id.".mlb";
+            $fp = fopen($file,"wb");
+            fwrite($fp,$content);
+            fclose($fp);
+        } catch (Exception $ex) {
+            echo $ex->getMessage();
+            die();
+        }
     }
 }
